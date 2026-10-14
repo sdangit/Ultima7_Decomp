@@ -144,6 +144,7 @@ Settings of this port, not in the original:
 | `--display=N` | macOS: open on display N from `--list-displays`; defaults to the primary display; also accepts `--display N` |
 | `--list-displays` | macOS: list connected displays, desktop and usable sizes in points, and Retina backing scale; no game data required |
 | `--scale=N` | initial window size, `N` times 320x240; positive integer, default 3; also accepts `--scale N` |
+| `--scanlines[=N]` | scanline darkness from 0 (off) to 1 (black bands); bare `--scanlines` uses 0.3; off by default; all platforms |
 | `--quiet-weapons` | no crackle from the fire sword and firedoom staff, no hum from the magic sword, Hoe of Destruction, Magebane and Death Scythe |
 | `--mt32-short-waits` | no pauses after MT-32 memory writes in the ending's music; the emulated MT-32 needs no settle time |
 
@@ -160,6 +161,12 @@ On macOS, run `Ultima7.app/Contents/MacOS/Ultima7 --list-displays`, then use
 and describe the currently connected displays; check the list again after changing the display
 setup. An unavailable display number exits with an error. Sizing uses macOS's usable desktop
 bounds for the Dock and menu bar; no additional Stage Manager margin is assumed.
+
+`--scanlines` enables libmatoya's basic scanline effect at 30% darkness. Use
+`--scanlines=0.15` for a subtler effect, `--scanlines=0.5` for darker bands, or
+`--scanlines=0` to turn it off. It applies to the displayed image across the menu, intro,
+game and ending, and requires no extra shader files. Very small displayed images skip the
+effect. Screenshots from `U7_TEST_INPUT` capture the original framebuffer before GPU effects.
 
 **Starting a new game.** Use "Start New Game" in the main menu. For scripted runs that skip the
 menu, this sets one up the way the menu does, and the game builds it on its next start:

@@ -9,6 +9,7 @@
  *                  +------------------- code (thread parked) --------------+
  */
 #include <errno.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -301,6 +302,7 @@ static void show_help(void)
 		"                      the screen; macOS uses points, before Retina scaling\n"
 		"  --display=<N>      macOS: open on display N from --list-displays (default: primary)\n"
 		"  --list-displays    macOS: list connected displays and their sizes, then exit\n"
+		"  --scanlines[=N]    scanline darkness, 0 to 1 (bare flag: 0.3; default: off)\n"
 		"  --quiet-weapons     no crackle from the fire sword and firedoom staff, no hum from\n"
 		"                      magic weapons\n"
 		"  --mt32-short-waits  no pauses after MT-32 memory writes (ending music), which\n"
@@ -320,6 +322,22 @@ static uint32_t parse_positive_number(const char *value, const char *option, uin
 			return (uint32_t) scale;
 	}
 	fprintf(stderr, "u7: %s requires a positive whole number no greater than %u\n", option, maximum);
+	exit(2);
+}
+
+static float parse_scanline_darkness(const char *value)
+{
+	char *end;
+	float darkness;
+
+	errno = 0;
+	if (value[0] == '.' || (value[0] >= '0' && value[0] <= '9')) {
+		darkness = strtof(value, &end);
+		if (errno == 0 && end != value && *end == '\0'
+			&& isfinite(darkness) && darkness >= 0 && darkness <= 1)
+			return darkness;
+	}
+	fprintf(stderr, "u7: --scanlines requires a darkness value from 0 to 1\n");
 	exit(2);
 }
 
@@ -344,6 +362,10 @@ static const char *take_data_dir(int argc, char **argv)
 			window_display = parse_positive_number(argv[i] + 10, "--display", UINT32_MAX);
 		else if (i > 0 && strcmp(argv[i], "--list-displays") == 0)
 			list_displays = true;
+		else if (i > 0 && strcmp(argv[i], "--scanlines") == 0)
+			video_set_scanlines(0.3f);
+		else if (i > 0 && strncmp(argv[i], "--scanlines=", 12) == 0)
+			video_set_scanlines(parse_scanline_darkness(argv[i] + 12));
 		else if (i > 0 && strcmp(argv[i], "--help") == 0)
 			show_help();
 		else {

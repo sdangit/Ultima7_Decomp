@@ -26,6 +26,14 @@
 #define TEXT_HEIGHT (TEXT_ROWS * 16)
 #define TEXT_PIXELS (TEXT_WIDTH * TEXT_HEIGHT)
 
+/* Chosen at startup and retained across program resets. */
+static float scanline_darkness;
+
+void video_set_scanlines(float darkness)
+{
+	scanline_darkness = darkness;
+}
+
 /* Game thread. */
 static uint8_t palette[256][4];
 static bool palette_dirty;
@@ -232,15 +240,20 @@ void video_view_rect(MTY_Size view, int32_t *x, int32_t *y, int32_t *w, int32_t 
 void video_draw(MTY_App *app, MTY_Window window)
 {
 	MTY_Size view = MTY_WindowGetSize(app, window);
+	float scale = video_scale(view);
 	MTY_RenderDesc desc = {
 		.format = MTY_COLOR_FORMAT_RGBA,
 		.filter = MTY_FILTER_NEAREST,
+		/* Matoya's scanline spacing is zero below 240 output rows; disable it when
+		 * the image is too small for a full aspect-corrected 1x scale. */
+		.effects = {scanline_darkness > 0 && scale > 0 ? MTY_EFFECT_SCANLINES : MTY_EFFECT_NONE},
+		.levels = {1.0f - scanline_darkness},
 		.imageWidth = WIDTH,
 		.imageHeight = HEIGHT,
 		.cropWidth = WIDTH,
 		.cropHeight = HEIGHT,
 		.aspectRatio = (float) WIDTH / ASPECT_HEIGHT,
-		.scale = video_scale(view),
+		.scale = scale,
 	};
 
 	MTY_MutexLock(frame_lock);

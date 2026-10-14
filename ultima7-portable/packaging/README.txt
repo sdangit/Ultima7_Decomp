@@ -131,6 +131,7 @@ Started from a terminal, each program accepts options (--help lists them):
   --scale <N>        initial window size: N times 320x240 (default 3)
   --display <N>      macOS: open on display N (default: primary)
   --list-displays    macOS: list connected displays and sizes, then exit
+  --scanlines[=N]    scanline darkness from 0 to 1 (bare flag uses 0.3)
   --cheat            enable the original cheat keys
   --adlib            AdLib music and effects, even when the MT-32 ROMs are there
   --roland           MT-32 music and effects (the default when the ROMs are there)
@@ -145,6 +146,10 @@ resize the window or toggle fullscreen afterward.
 On macOS, --list-displays works without game data. Use a number from that list
 with --display=2 (or --display 2); these numbers may change when displays are
 connected or disconnected. An unavailable display number reports an error.
+
+Scanlines are off by default. --scanlines turns them on at 30% darkness; use
+--scanlines=0.15 for a subtler effect, --scanlines=0.5 for darker bands, or
+--scanlines=0 to turn them off. This effect is available on all platforms.
 
 These environment variables are also available:
 

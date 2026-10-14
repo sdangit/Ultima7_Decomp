@@ -50,6 +50,8 @@ int64_t test_clock_us(void);
 void backend_sleep(uint32_t milliseconds);
 
 /* video.c */
+/* Scanline darkness from 0 (off) to 1 (black bands); retained between programs. */
+void video_set_scanlines(float darkness);
 void video_init(void);
 void video_reset(void);
 /* The game image inside a window of this size, in window pixels. */
