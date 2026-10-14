@@ -8,11 +8,15 @@
  *                  ^                                                       |
  *                  +------------------- code (thread parked) --------------+
  */
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "backend.h"
+#ifdef __APPLE__
+#include "displays.h"
+#endif
 
 #define WINDOW_TITLE "Ultima VII: The Black Gate"
 
@@ -32,6 +36,10 @@ static char fatal_text[1024];
 static int game_argc;
 static char **game_argv;
 static const char *program_name;
+/* Initial window size, in multiples of the aspect-corrected 320x240 image. */
+static uint32_t window_scale = 3;
+static uint32_t window_display;
+static bool list_displays;
 
 /* A program's exit code, handed to the launcher waiting in plat_run_program. */
 static MTY_Waitable *program_done;
@@ -268,7 +276,6 @@ static void *launcher_thread(void *opaque)
 	return NULL;
 }
 
-/* Takes "--data <dir>" and "--program <name>" out of the arguments the game sees. */
 static void show_help(void)
 {
 	printf("Usage: Ultima7 [--data <dir>] [switches]\n"
@@ -290,6 +297,10 @@ static void show_help(void)
 		"  --version           show the version, then stop\n"
 		"\n"
 		"Settings of this port:\n"
+		"  --scale=<N>        initial window size: N times 320x240 (default: 3); reduced to fit\n"
+		"                      the screen; macOS uses points, before Retina scaling\n"
+		"  --display=<N>      macOS: open on display N from --list-displays (default: primary)\n"
+		"  --list-displays    macOS: list connected displays and their sizes, then exit\n"
 		"  --quiet-weapons     no crackle from the fire sword and firedoom staff, no hum from\n"
 		"                      magic weapons\n"
 		"  --mt32-short-waits  no pauses after MT-32 memory writes (ending music), which\n"
@@ -297,6 +308,22 @@ static void show_help(void)
 	exit(0);
 }
 
+static uint32_t parse_positive_number(const char *value, const char *option, uint32_t maximum)
+{
+	char *end;
+	unsigned long scale;
+
+	errno = 0;
+	if (value != NULL && value[0] >= '0' && value[0] <= '9') {
+		scale = strtoul(value, &end, 10);
+		if (errno == 0 && *end == '\0' && scale > 0 && scale <= maximum)
+			return (uint32_t) scale;
+	}
+	fprintf(stderr, "u7: %s requires a positive whole number no greater than %u\n", option, maximum);
+	exit(2);
+}
+
+/* Consume backend options before forwarding the remaining arguments to the game. */
 static const char *take_data_dir(int argc, char **argv)
 {
 	const char *dir = getenv("U7_DATA");
@@ -307,6 +334,16 @@ static const char *take_data_dir(int argc, char **argv)
 			dir = argv[++i];
 		else if (i > 0 && strcmp(argv[i], "--program") == 0 && i + 1 < argc)
 			program_name = argv[++i];
+		else if (i > 0 && strcmp(argv[i], "--scale") == 0)
+			window_scale = parse_positive_number(i + 1 < argc ? argv[++i] : NULL, "--scale", UINT32_MAX / 320);
+		else if (i > 0 && strncmp(argv[i], "--scale=", 8) == 0)
+			window_scale = parse_positive_number(argv[i] + 8, "--scale", UINT32_MAX / 320);
+		else if (i > 0 && strcmp(argv[i], "--display") == 0)
+			window_display = parse_positive_number(i + 1 < argc ? argv[++i] : NULL, "--display", UINT32_MAX);
+		else if (i > 0 && strncmp(argv[i], "--display=", 10) == 0)
+			window_display = parse_positive_number(argv[i] + 10, "--display", UINT32_MAX);
+		else if (i > 0 && strcmp(argv[i], "--list-displays") == 0)
+			list_displays = true;
 		else if (i > 0 && strcmp(argv[i], "--help") == 0)
 			show_help();
 		else {
@@ -418,6 +455,19 @@ int main(int argc, char **argv)
 #endif
 	start_time = MTY_GetTime();
 	data_dir = take_data_dir(argc, argv);
+#ifdef __APPLE__
+	if (list_displays)
+		return displays_list() ? 0 : 2;
+	/* Scripted runs without explicit display selection need no connected display. */
+	if ((!test_input_active() || window_display != 0)
+		&& !displays_window_frame(window_display, window_scale, &frame))
+		return 2;
+#else
+	if (list_displays || window_display != 0) {
+		fprintf(stderr, "u7: --display and --list-displays are supported only on macOS\n");
+		return 2;
+	}
+#endif
 	files_set_root(data_dir != NULL ? data_dir : ".");
 	/* With no folder named: the current one, the program's own (a double-click does not always
 	 * start in the game's folder), then Documents/Ultima7. Documents comes last because macOS
@@ -458,7 +508,9 @@ int main(int argc, char **argv)
 	app = MTY_AppCreate(0, on_frame, on_event, NULL);
 	if (app == NULL)
 		plat_fatal("Could not start the window system.");
-	frame = MTY_MakeDefaultFrame(0, 0, 3 * 320, 3 * 240, 0.9f);
+#ifndef __APPLE__
+	frame = MTY_MakeDefaultFrame(0, 0, window_scale * 320, window_scale * 240, 0.9f);
+#endif
 	window = MTY_WindowCreate(app, WINDOW_TITLE, &frame, 0);
 	MTY_AppSetPNGCursor(app, blank_cursor, sizeof blank_cursor, 0, 0);
 	MTY_AppSetCursor(app, MTY_CURSOR_ARROW);

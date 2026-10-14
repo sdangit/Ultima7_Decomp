@@ -141,8 +141,25 @@ Settings of this port, not in the original:
 
 | Switch | Effect |
 | --- | --- |
+| `--display=N` | macOS: open on display N from `--list-displays`; defaults to the primary display; also accepts `--display N` |
+| `--list-displays` | macOS: list connected displays, desktop and usable sizes in points, and Retina backing scale; no game data required |
+| `--scale=N` | initial window size, `N` times 320x240; positive integer, default 3; also accepts `--scale N` |
 | `--quiet-weapons` | no crackle from the fire sword and firedoom staff, no hum from the magic sword, Hoe of Destruction, Magebane and Death Scythe |
 | `--mt32-short-waits` | no pauses after MT-32 memory writes in the ending's music; the emulated MT-32 needs no settle time |
+
+`--scale=3` requests a 960x720 window; `--scale=4` requests 1280x960. On macOS these
+are points, with Retina backing pixels handled automatically. On macOS the initial scale is
+capped to the largest whole-number scale that fits the selected display's usable desktop area,
+including room for the title bar and borders. Other platforms retain the existing screen-fit
+policy (including its 90% height limit).
+The option sets the initial window size; resizing and fullscreen still recalculate the rendering
+scale automatically, preserving the 4:3 aspect ratio and nearest-neighbor filtering.
+
+On macOS, run `Ultima7.app/Contents/MacOS/Ultima7 --list-displays`, then use
+`--display=2 --scale=4` to open on the second listed display. Display numbers are one-based
+and describe the currently connected displays; check the list again after changing the display
+setup. An unavailable display number exits with an error. Sizing uses macOS's usable desktop
+bounds for the Dock and menu bar; no additional Stage Manager margin is assumed.
 
 **Starting a new game.** Use "Start New Game" in the main menu. For scripted runs that skip the
 menu, this sets one up the way the menu does, and the game builds it on its next start:

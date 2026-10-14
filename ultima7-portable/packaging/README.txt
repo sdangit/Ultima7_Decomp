@@ -128,12 +128,25 @@ FOR ADVANCED USERS
 Started from a terminal, each program accepts options (--help lists them):
 
   --data <folder>    use the game files in this folder
+  --scale <N>        initial window size: N times 320x240 (default 3)
+  --display <N>      macOS: open on display N (default: primary)
+  --list-displays    macOS: list connected displays and sizes, then exit
   --cheat            enable the original cheat keys
   --adlib            AdLib music and effects, even when the MT-32 ROMs are there
   --roland           MT-32 music and effects (the default when the ROMs are there)
   --mt32-short-waits skip the original's pauses after MT-32 memory writes
 
-and these environment variables:
+The scale is a positive whole number; --scale=4 also works. On macOS, window
+sizes use points before Retina scaling. The scale is capped to a whole number
+that fits the selected display, allowing room for the Dock, menu bar, and window
+decorations. Other platforms use the existing screen-fit policy. You can still
+resize the window or toggle fullscreen afterward.
+
+On macOS, --list-displays works without game data. Use a number from that list
+with --display=2 (or --display 2); these numbers may change when displays are
+connected or disconnected. An unavailable display number reports an error.
+
+These environment variables are also available:
 
   U7_DATA            the game folder, instead of --data
   U7_MT32_ROMS       a folder holding the MT-32 ROMs, if not the game folder
