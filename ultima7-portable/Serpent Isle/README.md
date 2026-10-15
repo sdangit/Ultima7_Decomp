@@ -8,8 +8,8 @@ files, [Munt](https://github.com/munt/munt) to emulate the Roland MT-32 and
 [Nuked OPL3](https://github.com/nukeykt/Nuked-OPL3) to emulate the AdLib, for music and sound
 effects.
 
-**Status: in progress.** The program does not link yet. Everything below about running it
-follows the Black Gate port and is untested for Serpent Isle until said otherwise.
+The macOS app builds, and its startup options and settings have been tested. Linux and Windows
+requirements follow the Black Gate port; Serpent Isle has not been tested on those systems.
 
 Everything needed to build is in this folder and the shared folders beside it. You supply the
 game data and, optionally, the MT-32 ROMs.
@@ -126,25 +126,48 @@ The game's own command-line options, as switches (with what SI.EXE took):
 | `--roland[=n]` | `r` | Roland MT-32 music and effects (the default when the ROMs are found) |
 | `--shape-pool=KB` | `c` | size of the shape cache |
 | `--overlay-size` | `b` | report the DOS overlay buffer size, then stop |
-| `--version` | `?` | show the version, then stop |
+| `--version` | `?` | legacy game version switch; currently does not print a port version or exit immediately from the launcher |
 
-Settings of this port, not in the original:
+### Port command-line options
 
-| Switch | Effect |
-| --- | --- |
-| `--display=N` | macOS: display number from `--list-displays`, `primary`, or `uuid:UUID`; also accepts `--display N` |
-| `--list-displays` | macOS: list connected displays, desktop and usable sizes in points, and Retina backing scale; no game data required |
-| `--scale=N` | initial window size, `N` times 320x240; positive integer, default 3; also accepts `--scale N` |
-| `--scanlines[=N]` | scanline darkness from 0 (off) to 1 (black bands); bare `--scanlines` uses 0.3; off by default; all platforms |
-| `--music-volume=N` | combined music and sound-effect output volume, 0..100%, default 100; also accepts `--music-volume N` |
-| `--speech-volume=N` | speech output volume, 0..100%, default 100; also accepts `--speech-volume N` |
-| `--settings=FILE` | use this settings file instead of the game folder's `settings.cfg`; also accepts `--settings FILE` |
-| `--save-settings` | save effective settings, including CLI overrides, before launching |
-| `--music-device=M` | `auto`, `adlib`, or `roland`; overrides the saved device preference |
-| `--no-quiet-weapons` | override a saved `quiet_weapons=true` |
-| `--no-mt32-short-waits` | override a saved `mt32_short_waits=true` |
-| `--quiet-weapons` | no crackle from the fire sword and firedoom staff |
-| `--mt32-short-waits` | no pauses after MT-32 memory writes (timbre uploads at startup and for sound effects); the emulated MT-32 needs no settle time |
+| Switch | Settings-file key | Values and behavior |
+| --- | --- | --- |
+| `--settings=FILE` | — | use this file instead of `settings.cfg` in the game data folder; relative paths use the current working directory |
+| `--save-settings` | — | write effective settings, including CLI overrides, then launch; without this flag, CLI changes are temporary |
+| `--scale=N` | `scale` | whole number 1..13421772, default 3; initial window size is `N` times 320x240, reduced to fit the display |
+| `--display=N` | `display` | macOS only: a number from `--list-displays`, `primary` (default), or `uuid:UUID` |
+| `--list-displays` | — | macOS only: list display numbers, UUIDs, desktop and usable sizes in points, and Retina backing scale, then exit; no game data required |
+| `--scanlines[=N]` | `scanlines` | darkness 0..1, default 0 (off); bare `--scanlines` selects 0.3; 1 produces black bands |
+| `--music-device=M` | `music_device` | `auto` (default), `adlib`, or `roland`; `auto` uses MT-32 when ROMs are found, otherwise AdLib; `--adlib` and `--roland` set the same preference |
+| `--music-volume=N` | `music_volume` | whole-number percentage 0..100, default 100; music and sound effects share this output gain; 0 mutes, 100 preserves the original level |
+| `--speech-volume=N` | `speech_volume` | whole-number percentage 0..100, default 100; separate speech output gain; 0 mutes, 100 preserves the original level |
+| `--quiet-weapons` | `quiet_weapons` | set to `true`: no crackle from the fire sword and firedoom staff; default `false` |
+| `--no-quiet-weapons` | `quiet_weapons` | set to `false`, overriding a saved `true` |
+| `--mt32-short-waits` | `mt32_short_waits` | set to `true`: skip MT-32 memory-write settle pauses during timbre uploads at startup and for sound effects; default `false` |
+| `--no-mt32-short-waits` | `mt32_short_waits` | set to `false`, overriding a saved `true` |
+
+`--settings`, `--scale`, `--display`, `--music-device`, `--music-volume` and
+`--speech-volume` accept either `--option=value` or `--option value`. For a scanline value,
+use `--scanlines=N`; `--scanlines N` is not supported. If the same preference is supplied more
+than once on the command line, the last value wins, including device aliases and boolean pairs.
+Display selection and listing are macOS-only; the other settings work on all platforms.
+
+For example, try these settings for one launch:
+
+```sh
+build/Serpent --data /path/to/serpent --scale=4 --scanlines=0.3 \
+    --music-device=adlib --music-volume=100 --speech-volume=70
+```
+
+Add `--save-settings` to keep them for future launches. To use a separate preferences file:
+
+```sh
+build/Serpent --data /path/to/serpent --settings ./preferences.cfg \
+    --scale=4 --scanlines=0.3 --save-settings
+```
+
+On macOS, replace `build/Serpent` in these examples with
+`build/Serpent.app/Contents/MacOS/Serpent`.
 
 `--scale=3` requests a 960x720 window; `--scale=4` requests 1280x960. On macOS these
 are points, with Retina backing pixels handled automatically. On macOS the initial scale is
@@ -174,9 +197,12 @@ Both default to 100 (unchanged); 0 mutes the output while playback timing contin
 above 100 are rejected. The controls apply on all platforms and persist across programs.
 The in-game on/off preferences still apply. `U7_AUDIO_DUMP` includes the volume adjustments.
 
-**Saved settings.** Each game reads `settings.cfg` from its resolved game data folder.
+### Saved settings
+
+Each game reads `settings.cfg` from its resolved game data folder.
 The first successful startup creates a commented file containing internal defaults if it is
-missing. Omitted settings use defaults, then explicitly supplied CLI options override the file.
+missing. Precedence is **CLI options > settings file > internal defaults**. Omitted keys use
+internal defaults. The original DOS sound configuration does not select these port preferences.
 CLI overrides apply only to the current launch unless `--save-settings` is supplied. This also
 applies on the first run: without `--save-settings`, the new file contains defaults, not the CLI
 experiment. Help and display listing do not read or write settings or require game data.
@@ -190,8 +216,8 @@ display = primary         # macOS: primary, a listed display number, or uuid:UUI
 scanlines = 0             # 0..1 darkness; 0=off
 music_volume = 100        # whole number 0..100; combined music/SFX output
 speech_volume = 100       # whole number 0..100
-music_device = auto      # auto, adlib, roland
-quiet_weapons = false    # true, false
+music_device = auto       # auto, adlib, roland
+quiet_weapons = false     # true, false
 mt32_short_waits = false  # true, false
 ```
 
@@ -209,9 +235,11 @@ its initial window is capped to fit. A disconnected saved UUID is retained. Non-
 retain but ignore the saved macOS display preference; explicit display CLI options remain
 unsupported there.
 
-Malformed lines, unknown or duplicate keys, out-of-range values and file read/write errors stop
-launch with a specific error. Invalid existing files are never rewritten, even if a valid CLI
-override supplies that setting. In-game music/speech/effects on/off preferences remain in the
+Invalid CLI values, malformed settings lines, unknown or duplicate keys, out-of-range values
+and file read/write errors stop launch with a specific error; invalid values do not silently fall
+back to defaults. Settings-file errors identify the file and line where applicable. Invalid
+existing files are never rewritten, even if a valid CLI override supplies that setting.
+In-game music/speech/effects on/off preferences remain in the
 original game files; `U7.CFG` / `SERPENT.CFG` are not modified by this feature.
 
 To run the shared settings regression tests without game data:
