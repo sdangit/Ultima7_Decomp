@@ -128,14 +128,20 @@ FOR ADVANCED USERS
 Started from a terminal, each program accepts options (--help lists them):
 
   --data <folder>    use the game files in this folder
+  --settings <file>  use a custom settings file
+  --save-settings    save effective settings before launching
   --scale <N>        initial window size: N times 320x240 (default 3)
   --display <N>      macOS: open on display N (default: primary)
   --list-displays    macOS: list connected displays and sizes, then exit
   --scanlines[=N]    scanline darkness from 0 to 1 (bare flag uses 0.3)
+  --music-device=M  auto, adlib, or roland
+  --music-volume=N  combined music/SFX output volume, 0 to 100 (default 100)
+  --speech-volume=N speech output volume, 0 to 100 (default 100)
   --cheat            enable the original cheat keys
   --adlib            AdLib music and effects, even when the MT-32 ROMs are there
   --roland           MT-32 music and effects (the default when the ROMs are there)
   --mt32-short-waits skip the original's pauses after MT-32 memory writes
+  --no-quiet-weapons and --no-mt32-short-waits override saved true values
 
 The scale is a positive whole number; --scale=4 also works. On macOS, window
 sizes use points before Retina scaling. The scale is capped to a whole number
@@ -145,11 +151,48 @@ resize the window or toggle fullscreen afterward.
 
 On macOS, --list-displays works without game data. Use a number from that list
 with --display=2 (or --display 2); these numbers may change when displays are
-connected or disconnected. An unavailable display number reports an error.
+connected or disconnected. Explicitly requesting an unavailable display reports
+an error. A disconnected saved monitor falls back to primary for that launch.
 
 Scanlines are off by default. --scanlines turns them on at 30% darkness; use
 --scanlines=0.15 for a subtler effect, --scanlines=0.5 for darker bands, or
 --scanlines=0 to turn them off. This effect is available on all platforms.
+
+Volume controls preserve the original synth settings and apply to the rendered
+audio. Music and effects remain combined; speech is adjusted separately. Both
+default to 100%, and 0 mutes output without stopping playback. Values above 100
+are rejected. The in-game on/off preferences still apply. A space instead of =
+also works, for example --music-volume 60.
+
+SAVED SETTINGS
+
+Each game reads settings.cfg from its game data folder. If missing, it creates a
+commented default file on startup. Keys omitted from a file use internal defaults.
+CLI arguments override the file for one launch. Add --save-settings to persist
+them; otherwise even a first run writes defaults rather than CLI overrides.
+
+The generated file documents each setting and its allowed values:
+
+  scale = 3                # positive whole number (maximum 13421772)
+  display = primary        # macOS: primary, display number, or uuid:UUID
+  scanlines = 0            # darkness 0..1; 0=off
+  music_volume = 100       # whole number 0..100; combined music/SFX
+  speech_volume = 100      # whole number 0..100
+  music_device = auto     # auto, adlib, roland
+  quiet_weapons = false   # true, false
+  mt32_short_waits = false # true, false
+
+Use # or ; for full-line or inline comments. Keys and keywords are case-sensitive.
+Malformed lines, unknown/duplicate keys, invalid values and file errors stop
+launch; invalid files remain untouched, even with CLI overrides. Saving rewrites
+the documented file. --settings <file> selects a different location; relative
+paths use the current working directory and parent folders must already exist.
+Help and --list-displays do not read or write settings.
+
+On macOS, --save-settings converts a connected numbered display choice to a
+stable UUID and saves the requested scale, before fitting it to a screen. Other
+platforms retain but ignore the saved macOS display preference. In-game audio
+on/off preferences stay in the original game files.
 
 These environment variables are also available:
 

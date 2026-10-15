@@ -86,6 +86,9 @@ void nullpage_reset(void);
 /* audio.c */
 /* 'a' plays AdLib, 'r' the MT-32; otherwise the MT-32 when its ROMs are found. */
 void audio_choose_music(char device);
+/* Startup-only output volume percentages, 0..100; music includes sound effects. */
+void audio_set_music_volume(uint32_t percent);
+void audio_set_speech_volume(uint32_t percent);
 void audio_start(void);
 /* Stops the sound tick, flushes queued MIDI and speech, and restarts the synth as powered on. */
 void audio_reset(void);

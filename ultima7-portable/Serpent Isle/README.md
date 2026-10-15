@@ -132,10 +132,17 @@ Settings of this port, not in the original:
 
 | Switch | Effect |
 | --- | --- |
-| `--display=N` | macOS: open on display N from `--list-displays`; defaults to the primary display; also accepts `--display N` |
+| `--display=N` | macOS: display number from `--list-displays`, `primary`, or `uuid:UUID`; also accepts `--display N` |
 | `--list-displays` | macOS: list connected displays, desktop and usable sizes in points, and Retina backing scale; no game data required |
 | `--scale=N` | initial window size, `N` times 320x240; positive integer, default 3; also accepts `--scale N` |
 | `--scanlines[=N]` | scanline darkness from 0 (off) to 1 (black bands); bare `--scanlines` uses 0.3; off by default; all platforms |
+| `--music-volume=N` | combined music and sound-effect output volume, 0..100%, default 100; also accepts `--music-volume N` |
+| `--speech-volume=N` | speech output volume, 0..100%, default 100; also accepts `--speech-volume N` |
+| `--settings=FILE` | use this settings file instead of the game folder's `settings.cfg`; also accepts `--settings FILE` |
+| `--save-settings` | save effective settings, including CLI overrides, before launching |
+| `--music-device=M` | `auto`, `adlib`, or `roland`; overrides the saved device preference |
+| `--no-quiet-weapons` | override a saved `quiet_weapons=true` |
+| `--no-mt32-short-waits` | override a saved `mt32_short_waits=true` |
 | `--quiet-weapons` | no crackle from the fire sword and firedoom staff |
 | `--mt32-short-waits` | no pauses after MT-32 memory writes (timbre uploads at startup and for sound effects); the emulated MT-32 needs no settle time |
 
@@ -150,14 +157,69 @@ scale automatically, preserving the 4:3 aspect ratio and nearest-neighbor filter
 On macOS, run `Serpent.app/Contents/MacOS/Serpent --list-displays`, then use
 `--display=2 --scale=4` to open on the second listed display. Display numbers are one-based
 and describe the currently connected displays; check the list again after changing the display
-setup. An unavailable display number exits with an error. Sizing uses macOS's usable desktop
-bounds for the Dock and menu bar; no additional Stage Manager margin is assumed.
+setup. An unavailable explicitly requested display exits with an error. A disconnected saved
+display falls back to primary for that launch. Sizing uses macOS's usable desktop bounds for the
+Dock and menu bar; no additional Stage Manager margin is assumed.
 
 `--scanlines` enables libmatoya's basic scanline effect at 30% darkness. Use
 `--scanlines=0.15` for a subtler effect, `--scanlines=0.5` for darker bands, or
 `--scanlines=0` to turn it off. It applies to the displayed image across the menu, intro,
 game and ending, and requires no extra shader files. Very small displayed images skip the
 effect. Screenshots from `U7_TEST_INPUT` capture the original framebuffer before GPU effects.
+
+Volume controls scale the rendered audio without changing the synth's instrument settings,
+MIDI volumes, fades, or music/SFX balance. `--music-volume=60` lowers music and effects together
+to 60% of their existing sample amplitude, while `--speech-volume=80` sets speech to 80%.
+Both default to 100 (unchanged); 0 mutes the output while playback timing continues. Values
+above 100 are rejected. The controls apply on all platforms and persist across programs.
+The in-game on/off preferences still apply. `U7_AUDIO_DUMP` includes the volume adjustments.
+
+**Saved settings.** Each game reads `settings.cfg` from its resolved game data folder.
+The first successful startup creates a commented file containing internal defaults if it is
+missing. Omitted settings use defaults, then explicitly supplied CLI options override the file.
+CLI overrides apply only to the current launch unless `--save-settings` is supplied. This also
+applies on the first run: without `--save-settings`, the new file contains defaults, not the CLI
+experiment. Help and display listing do not read or write settings or require game data.
+
+The file uses `key = value`, with full-line or inline `#` / `;` comments. Keys and keyword values
+are case-sensitive. Its supported settings and defaults are:
+
+```ini
+scale = 3                 # whole number 1..13421772; requested size, before screen fitting
+display = primary         # macOS: primary, a listed display number, or uuid:UUID
+scanlines = 0             # 0..1 darkness; 0=off
+music_volume = 100        # whole number 0..100; combined music/SFX output
+speech_volume = 100       # whole number 0..100
+music_device = auto      # auto, adlib, roland
+quiet_weapons = false    # true, false
+mt32_short_waits = false  # true, false
+```
+
+Use `--settings /path/to/preferences.cfg` (or `--settings=/path/to/preferences.cfg`) for a custom
+file. Relative paths are relative to the current working directory. Missing custom files are
+created too; their parent folder must already exist. For example:
+
+```sh
+Serpent.app/Contents/MacOS/Serpent --scale=6 --scanlines=0.3 --music-volume=80 --save-settings
+```
+
+Saving rewrites the file with documented effective settings. On macOS, a connected numbered
+display choice is saved as a stable display UUID, and the requested scale is saved even when
+its initial window is capped to fit. A disconnected saved UUID is retained. Non-macOS builds
+retain but ignore the saved macOS display preference; explicit display CLI options remain
+unsupported there.
+
+Malformed lines, unknown or duplicate keys, out-of-range values and file read/write errors stop
+launch with a specific error. Invalid existing files are never rewritten, even if a valid CLI
+override supplies that setting. In-game music/speech/effects on/off preferences remain in the
+original game files; `U7.CFG` / `SERPENT.CFG` are not modified by this feature.
+
+To run the shared settings regression tests without game data:
+
+```sh
+cmake --build build --target u7_settings_test
+ctest --test-dir build --output-on-failure
+```
 
 **Starting a new game.** Use the main menu's new game choice. For scripted runs that skip the
 menu, this sets one up the way the menu does, and the game builds it on its next start:

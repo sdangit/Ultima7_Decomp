@@ -46,6 +46,20 @@ static MTY_Atomic32 running;
 static _Thread_local bool on_audio_thread;
 /* 'a' for --adlib, 'r' for --roland, 0 to use the MT-32 when its ROMs are found. */
 static char music_choice;
+/* Output gains, chosen before the audio thread starts; retained across program resets.
+ * Music and sound effects share the synth output. Speech has its own PCM path. */
+static uint32_t music_volume = 100;
+static uint32_t speech_volume = 100;
+
+void audio_set_music_volume(uint32_t percent)
+{
+	music_volume = percent;
+}
+
+void audio_set_speech_volume(uint32_t percent)
+{
+	speech_volume = percent;
+}
 
 /* MIDI bytes waiting for the audio thread. */
 static MTY_Mutex *midi_mutex;
@@ -415,6 +429,23 @@ static int16_t clamp_sample(int32_t v)
 	return (int16_t) (v < -32768 ? -32768 : v > 32767 ? 32767 : v);
 }
 
+/* Scale rendered samples only. At 100% the original integer sample is unchanged.
+ * The command line caps gains at unity, so these controls never amplify the signal. */
+static int32_t scale_sample(int32_t sample, uint32_t percent)
+{
+	return percent == 100 ? sample : (int32_t) lrint((double) sample * percent / 100.0);
+}
+
+/* Music and SFX have already been synthesized together; preserve their internal balance,
+ * notes, fades and reverb by applying one gain to this output before speech is mixed in. */
+static void scale_music(int16_t *block)
+{
+	if (music_volume == 100)
+		return;
+	for (int i = 0; i < BLOCK_FRAMES * 2; i++)
+		block[i] = (int16_t) scale_sample(block[i], music_volume);
+}
+
 /* Speech played through a Sound Blaster 2.0: its DAC held each sample until the next, and
  * its output went through a 2-pole low-pass at about 4.8 kHz. */
 #define SB_FILTER_HZ 4800.0
@@ -468,7 +499,7 @@ static void mix_speech(int16_t *block)
 				pcm_count--;
 			}
 		}
-		v = (int32_t) lrint(sb_filter(x));
+		v = scale_sample((int32_t) lrint(sb_filter(x)), speech_volume);
 		block[2 * i] = clamp_sample(block[2 * i] + v);
 		block[2 * i + 1] = clamp_sample(block[2 * i + 1] + v);
 	}
@@ -682,6 +713,7 @@ static void render_block(int16_t *block)
 		memset(block, 0, BLOCK_FRAMES * 2 * sizeof *block);
 	}
 	mix_opl(block);
+	scale_music(block);
 	mix_speech(block);
 	if (dump != NULL)
 		fwrite(block, sizeof *block, BLOCK_FRAMES * 2, dump);

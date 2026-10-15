@@ -3,6 +3,7 @@
 #import <AppKit/AppKit.h>
 
 #include <math.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -11,6 +12,66 @@
 static uint32_t display_id(NSScreen *screen)
 {
 	return [screen.deviceDescription[@"NSScreenNumber"] unsignedIntValue];
+}
+
+static bool display_uuid(NSScreen *screen, char *out, size_t size)
+{
+	CFUUIDRef uuid = CGDisplayCreateUUIDFromDisplayID(display_id(screen));
+	CFStringRef text = uuid ? CFUUIDCreateString(NULL, uuid) : NULL;
+	bool ok = false;
+
+	if (text != NULL && size >= 42) {
+		memcpy(out, "uuid:", 5);
+		ok = CFStringGetCString(text, out + 5, size - 5, kCFStringEncodingUTF8);
+		if (ok)
+			for (size_t i = 5; out[i] != '\0'; i++)
+				out[i] = (char) tolower((unsigned char) out[i]);
+	}
+	if (text) CFRelease(text);
+	if (uuid) CFRelease(uuid);
+	return ok;
+}
+
+bool displays_persistent_name(uint32_t display, char *out, size_t size)
+{
+	@autoreleasepool {
+		if (display == 0) {
+			snprintf(out, size, "primary");
+			return true;
+		}
+		NSArray<NSScreen *> *screens = NSScreen.screens;
+		return display <= screens.count && display_uuid(screens[display - 1], out, size);
+	}
+}
+
+bool displays_resolve(const char *selection, bool fallback, uint32_t *display)
+{
+	@autoreleasepool {
+		NSArray<NSScreen *> *screens = NSScreen.screens;
+
+		*display = 0;
+		if (strcmp(selection, "primary") == 0) return true;
+		if (strncmp(selection, "uuid:", 5) == 0) {
+			for (NSUInteger i = 0; i < screens.count; i++) {
+				char uuid[48];
+
+				if (display_uuid(screens[i], uuid, sizeof uuid) && strcmp(uuid, selection) == 0) {
+					*display = (uint32_t) i + 1;
+					return true;
+				}
+			}
+		} else {
+			unsigned long number = strtoul(selection, NULL, 10);
+
+			if (number > 0 && number <= screens.count) {
+				*display = (uint32_t) number;
+				return true;
+			}
+		}
+		fprintf(stderr, "u7: %s display %s is unavailable; %s\n", fallback ? "saved" : "requested",
+			selection, fallback ? "using primary display" : "use --list-displays to see connected displays");
+		return fallback;
+	}
 }
 
 bool displays_list(void)
@@ -25,12 +86,16 @@ bool displays_list(void)
 		for (NSUInteger i = 0; i < screens.count; i++) {
 			NSScreen *screen = screens[i];
 			NSSize desktop = screen.frame.size, usable = screen.visibleFrame.size;
+			char uuid[48] = "unavailable";
+
+			display_uuid(screen, uuid, sizeof uuid);
 
 			printf("%lu: %s%s; desktop %.0fx%.0f points; usable %.0fx%.0f points; "
 				"backing scale %.2gx; ID %u\n", (unsigned long) i + 1,
 				screen.localizedName.UTF8String, i == 0 ? " (primary)" : "",
 				desktop.width, desktop.height, usable.width, usable.height,
 				screen.backingScaleFactor, display_id(screen));
+			printf("   Settings display value: %s\n", uuid);
 		}
 		return true;
 	}

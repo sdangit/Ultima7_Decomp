@@ -8,13 +8,12 @@
  *                  ^                                                       |
  *                  +------------------- code (thread parked) --------------+
  */
-#include <errno.h>
-#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "backend.h"
+#include "settings.h"
 #ifdef __APPLE__
 #include "displays.h"
 #endif
@@ -39,8 +38,12 @@ static char **game_argv;
 static const char *program_name;
 /* Initial window size, in multiples of the aspect-corrected 320x240 image. */
 static uint32_t window_scale = 3;
-static uint32_t window_display;
 static bool list_displays;
+static bool display_override;
+static bool save_settings;
+static const char *settings_path;
+static U7_Settings cli_settings;
+static uint32_t cli_settings_mask;
 
 /* A program's exit code, handed to the launcher waiting in plat_run_program. */
 static MTY_Waitable *program_done;
@@ -286,6 +289,8 @@ static void show_help(void)
 		"\n"
 		"  --data <dir>        the game folder (default: U7_DATA, else the current folder if it\n"
 		"                      has STATIC, else the folder Serpent is in)\n"
+		"  --settings <file>   settings file (default: settings.cfg in the game folder)\n"
+		"  --save-settings     write effective settings before launching (otherwise CLI is temporary)\n"
 		"  --program <name>    run one program alone: si (add p), mainmenu, intro, endgame\n"
 		"  --help              this list\n"
 		"\n"
@@ -303,44 +308,37 @@ static void show_help(void)
 		"Settings of this port:\n"
 		"  --scale=<N>        initial window size: N times 320x240 (default: 3); reduced to fit\n"
 		"                      the screen; macOS uses points, before Retina scaling\n"
-		"  --display=<N>      macOS: open on display N from --list-displays (default: primary)\n"
+		"  --display=<N>      macOS: display number, primary, or uuid:UUID (default: primary)\n"
 		"  --list-displays    macOS: list connected displays and their sizes, then exit\n"
 		"  --scanlines[=N]    scanline darkness, 0 to 1 (bare flag: 0.3; default: off)\n"
+		"  --music-device=M  auto, adlib, or roland; --adlib/--roland also override this setting\n"
+		"  --music-volume=N  combined music/SFX volume, 0 to 100 (default: 100)\n"
+		"  --speech-volume=N speech volume, 0 to 100 (default: 100)\n"
 		"  --quiet-weapons     no crackle from the fire sword and firedoom staff\n"
+		"  --no-quiet-weapons override quiet_weapons=true in settings\n"
 		"  --mt32-short-waits  no pauses after MT-32 memory writes (timbre uploads), which\n"
-		"                      the emulated synth does not need\n");
+		"                      the emulated synth does not need\n"
+		"  --no-mt32-short-waits override mt32_short_waits=true in settings\n");
 	exit(0);
 }
 
-static uint32_t parse_positive_number(const char *value, const char *option, uint32_t maximum)
+static void set_cli_setting(const char *key, const char *value)
 {
-	char *end;
-	unsigned long scale;
+	char error[384];
 
-	errno = 0;
-	if (value != NULL && value[0] >= '0' && value[0] <= '9') {
-		scale = strtoul(value, &end, 10);
-		if (errno == 0 && *end == '\0' && scale > 0 && scale <= maximum)
-			return (uint32_t) scale;
+	if (!settings_set(&cli_settings, &cli_settings_mask, key, value, error, sizeof error)) {
+		fprintf(stderr, "u7: command line: %s\n", error);
+		exit(2);
 	}
-	fprintf(stderr, "u7: %s requires a positive whole number no greater than %u\n", option, maximum);
-	exit(2);
 }
 
-static float parse_scanline_darkness(const char *value)
+static const char *settings_file_argument(const char *value)
 {
-	char *end;
-	float darkness;
-
-	errno = 0;
-	if (value[0] == '.' || (value[0] >= '0' && value[0] <= '9')) {
-		darkness = strtof(value, &end);
-		if (errno == 0 && end != value && *end == '\0'
-			&& isfinite(darkness) && darkness >= 0 && darkness <= 1)
-			return darkness;
+	if (value == NULL || value[0] == '\0' || strncmp(value, "--", 2) == 0) {
+		fprintf(stderr, "u7: --settings requires a file path\n");
+		exit(2);
 	}
-	fprintf(stderr, "u7: --scanlines requires a darkness value from 0 to 1\n");
-	exit(2);
+	return value;
 }
 
 /* Consume backend options before forwarding the remaining arguments to the game. */
@@ -348,34 +346,64 @@ static const char *take_data_dir(int argc, char **argv)
 {
 	const char *dir = getenv("U7_DATA");
 
-	game_argv = calloc((size_t) argc + 1, sizeof *game_argv);
+	settings_defaults(&cli_settings);
+	/* Two saved boolean preferences may add game arguments even with no CLI arguments. */
+	game_argv = calloc((size_t) argc + 3, sizeof *game_argv);
 	for (int i = 0; i < argc; i++) {
 		if (i > 0 && strcmp(argv[i], "--data") == 0 && i + 1 < argc)
 			dir = argv[++i];
 		else if (i > 0 && strcmp(argv[i], "--program") == 0 && i + 1 < argc)
 			program_name = argv[++i];
+		else if (i > 0 && strcmp(argv[i], "--settings") == 0)
+			settings_path = settings_file_argument(i + 1 < argc ? argv[++i] : NULL);
+		else if (i > 0 && strncmp(argv[i], "--settings=", 11) == 0)
+			settings_path = settings_file_argument(argv[i] + 11);
+		else if (i > 0 && strcmp(argv[i], "--save-settings") == 0)
+			save_settings = true;
 		else if (i > 0 && strcmp(argv[i], "--scale") == 0)
-			window_scale = parse_positive_number(i + 1 < argc ? argv[++i] : NULL, "--scale", UINT32_MAX / 320);
+			set_cli_setting("scale", i + 1 < argc ? argv[++i] : NULL);
 		else if (i > 0 && strncmp(argv[i], "--scale=", 8) == 0)
-			window_scale = parse_positive_number(argv[i] + 8, "--scale", UINT32_MAX / 320);
-		else if (i > 0 && strcmp(argv[i], "--display") == 0)
-			window_display = parse_positive_number(i + 1 < argc ? argv[++i] : NULL, "--display", UINT32_MAX);
-		else if (i > 0 && strncmp(argv[i], "--display=", 10) == 0)
-			window_display = parse_positive_number(argv[i] + 10, "--display", UINT32_MAX);
-		else if (i > 0 && strcmp(argv[i], "--list-displays") == 0)
+			set_cli_setting("scale", argv[i] + 8);
+		else if (i > 0 && strcmp(argv[i], "--display") == 0) {
+			set_cli_setting("display", i + 1 < argc ? argv[++i] : NULL);
+			display_override = true;
+		} else if (i > 0 && strncmp(argv[i], "--display=", 10) == 0) {
+			set_cli_setting("display", argv[i] + 10);
+			display_override = true;
+		} else if (i > 0 && strcmp(argv[i], "--list-displays") == 0)
 			list_displays = true;
 		else if (i > 0 && strcmp(argv[i], "--scanlines") == 0)
-			video_set_scanlines(0.3f);
+			set_cli_setting("scanlines", "0.3");
 		else if (i > 0 && strncmp(argv[i], "--scanlines=", 12) == 0)
-			video_set_scanlines(parse_scanline_darkness(argv[i] + 12));
+			set_cli_setting("scanlines", argv[i] + 12);
+		else if (i > 0 && strcmp(argv[i], "--music-volume") == 0)
+			set_cli_setting("music_volume", i + 1 < argc ? argv[++i] : NULL);
+		else if (i > 0 && strncmp(argv[i], "--music-volume=", 15) == 0)
+			set_cli_setting("music_volume", argv[i] + 15);
+		else if (i > 0 && strcmp(argv[i], "--speech-volume") == 0)
+			set_cli_setting("speech_volume", i + 1 < argc ? argv[++i] : NULL);
+		else if (i > 0 && strncmp(argv[i], "--speech-volume=", 16) == 0)
+			set_cli_setting("speech_volume", argv[i] + 16);
+		else if (i > 0 && strcmp(argv[i], "--music-device") == 0)
+			set_cli_setting("music_device", i + 1 < argc ? argv[++i] : NULL);
+		else if (i > 0 && strncmp(argv[i], "--music-device=", 15) == 0)
+			set_cli_setting("music_device", argv[i] + 15);
+		else if (i > 0 && strcmp(argv[i], "--quiet-weapons") == 0)
+			set_cli_setting("quiet_weapons", "true");
+		else if (i > 0 && strcmp(argv[i], "--no-quiet-weapons") == 0)
+			set_cli_setting("quiet_weapons", "false");
+		else if (i > 0 && strcmp(argv[i], "--mt32-short-waits") == 0)
+			set_cli_setting("mt32_short_waits", "true");
+		else if (i > 0 && strcmp(argv[i], "--no-mt32-short-waits") == 0)
+			set_cli_setting("mt32_short_waits", "false");
 		else if (i > 0 && strcmp(argv[i], "--help") == 0)
 			show_help();
 		else {
-			/* The programs read these too; which synth plays is the backend's choice. */
+			/* Retain the game's optional port arguments while recording the backend choice. */
 			if (strcmp(argv[i], "--adlib") == 0 || strncmp(argv[i], "--adlib=", 8) == 0)
-				audio_choose_music('a');
+				set_cli_setting("music_device", "adlib");
 			else if (strcmp(argv[i], "--roland") == 0 || strncmp(argv[i], "--roland=", 9) == 0)
-				audio_choose_music('r');
+				set_cli_setting("music_device", "roland");
 			game_argv[game_argc++] = argv[i];
 		}
 	}
@@ -447,6 +475,80 @@ static bool documents_directory(char *out, size_t size)
 #endif
 }
 
+/* Called after resolving and checking the game folder, before starting any game/audio thread. */
+static bool configure_settings(MTY_Frame *frame)
+{
+	char default_path[4096], error[4608];
+	const char *path = settings_path;
+	U7_Settings settings;
+	bool missing;
+
+	if (path == NULL) {
+		if (snprintf(default_path, sizeof default_path, "%s/settings.cfg", files_root()) >= (int) sizeof default_path) {
+			fprintf(stderr, "u7: game folder path is too long for settings.cfg\n");
+			return false;
+		}
+		path = default_path;
+	}
+	settings_defaults(&settings);
+	if (!settings_load(path, &settings, &missing, error, sizeof error)) {
+		fprintf(stderr, "u7: %s\n", error);
+		return false;
+	}
+	settings_overlay(&settings, &cli_settings, cli_settings_mask);
+#ifdef __APPLE__
+	/* A saved monitor may have been unplugged. Explicit requests must still resolve. */
+	if (!test_input_active() || display_override
+		|| (save_settings && strcmp(settings.display, "primary") != 0)) {
+		uint32_t display;
+
+		if (!displays_resolve(settings.display, !display_override, &display)
+			|| !displays_window_frame(display, settings.scale, frame))
+			return false;
+		/* Keep a disconnected saved UUID so reconnecting restores the requested monitor. */
+		if (save_settings && strcmp(settings.display, "primary") != 0 && display != 0
+			&& !displays_persistent_name(display, settings.display, sizeof settings.display)) {
+			fprintf(stderr, "u7: could not obtain a persistent display identifier\n");
+			return false;
+		}
+	}
+#else
+	(void) frame;
+#endif
+	if (missing || save_settings) {
+		U7_Settings written = settings;
+
+		/* First-run CLI experiments do not become preferences without --save-settings. */
+		if (!save_settings) settings_defaults(&written);
+		if (!settings_write(path, &written, !missing, error, sizeof error)) {
+			fprintf(stderr, "u7: %s\n", error);
+			return false;
+		}
+	}
+	/* A later --music-device override supersedes earlier device switches, including their
+	 * optional game arguments. Keep optional arguments only for the effective device. */
+	int forwarded = 0;
+	for (int i = 0; i < game_argc; i++) {
+		bool adlib = strcmp(game_argv[i], "--adlib") == 0 || strncmp(game_argv[i], "--adlib=", 8) == 0;
+		bool roland = strcmp(game_argv[i], "--roland") == 0 || strncmp(game_argv[i], "--roland=", 9) == 0;
+
+		if (i > 0 && ((adlib && settings.music_device != 'a') || (roland && settings.music_device != 'r')))
+			continue;
+		game_argv[forwarded++] = game_argv[i];
+	}
+	game_argc = forwarded;
+	game_argv[game_argc] = NULL;
+	window_scale = settings.scale;
+	video_set_scanlines(settings.scanlines);
+	audio_set_music_volume(settings.music_volume);
+	audio_set_speech_volume(settings.speech_volume);
+	audio_choose_music(settings.music_device);
+	if (settings.quiet_weapons) game_argv[game_argc++] = "--quiet-weapons";
+	if (settings.mt32_short_waits) game_argv[game_argc++] = "--mt32-short-waits";
+	game_argv[game_argc] = NULL;
+	return true;
+}
+
 #ifdef _WIN32
 
 /* The exe is a windowed program, so a double-click opens no console. Started from a terminal,
@@ -482,12 +584,8 @@ int main(int argc, char **argv)
 #ifdef __APPLE__
 	if (list_displays)
 		return displays_list() ? 0 : 2;
-	/* Scripted runs without explicit display selection need no connected display. */
-	if ((!test_input_active() || window_display != 0)
-		&& !displays_window_frame(window_display, window_scale, &frame))
-		return 2;
 #else
-	if (list_displays || window_display != 0) {
+	if (list_displays || display_override) {
 		fprintf(stderr, "u7: --display and --list-displays are supported only on macOS\n");
 		return 2;
 	}
@@ -518,6 +616,8 @@ int main(int argc, char **argv)
 				"folder and back in, then open it again.");
 		plat_fatal(problem);
 	}
+	if (!configure_settings(&frame))
+		return 2;
 	nullpage_install();
 	events_init();
 	video_init();
