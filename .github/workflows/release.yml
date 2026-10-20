@@ -1,6 +1,7 @@
-# Builds the portable Black Gate (Ultima7) and Serpent Isle (Serpent) for macOS, Windows and
-# Linux, both programs in one archive per platform. A pushed tag starting with "v" also publishes
-# the archives as a GitHub release; a manual run only keeps them as workflow artifacts.
+# Builds the portable Black Gate (Ultima7) and Serpent Isle (Serpent), and Ultima7Modern, for
+# macOS, Windows and Linux: the two portable programs in one archive per platform, Ultima7Modern in
+# another. A pushed tag starting with "v" also publishes the archives as a GitHub release; a manual
+# run only keeps them as workflow artifacts.
 name: Release builds
 
 on:
@@ -15,6 +16,7 @@ env:
   SHARED_DIR: ultima7-portable
   BG_DIR: ultima7-portable/Black Gate
   SI_DIR: ultima7-portable/Serpent Isle
+  MODERN_DIR: ultima7-modern
 
 jobs:
   build:
@@ -49,6 +51,8 @@ jobs:
           cmake --build build-bg --target u7 --parallel
           cmake -S "$SI_DIR" -B build-si -DCMAKE_BUILD_TYPE=Release
           cmake --build build-si --target serpent --parallel
+          cmake -S "$MODERN_DIR" -B build-modern -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-modern --target modern --parallel
 
       # Developer ID signature, then Apple's notarization ticket stapled to each app, so macOS
       # opens them without "Open Anyway".
@@ -75,7 +79,7 @@ jobs:
           identity=$(security find-identity -v -p codesigning "$keychain" \
             | awk '/Developer ID Application/ { print $2; exit }')
           echo "SIGNING_IDENTITY=$identity" >> "$GITHUB_ENV"
-          for app in build-bg/Ultima7.app build-si/Serpent.app; do
+          for app in build-bg/Ultima7.app build-si/Serpent.app build-modern/Ultima7Modern.app; do
             codesign --force --options runtime --timestamp --sign "$identity" "$app"
             codesign --verify --strict --verbose=2 "$app"
             "$SHARED_DIR/packaging/notarize.sh" "$app"
@@ -92,7 +96,8 @@ jobs:
           Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
           Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments '-arch=x64 -host_arch=x64'
           $env:PATH = ($env:PATH -split ';' | Where-Object { $_ -notmatch 'Git\\usr\\bin' }) -join ';'
-          foreach ($game in @(@("$env:BG_DIR", "build-bg", "u7"), @("$env:SI_DIR", "build-si", "serpent"))) {
+          foreach ($game in @(@("$env:BG_DIR", "build-bg", "u7"), @("$env:SI_DIR", "build-si", "serpent"),
+                              @("$env:MODERN_DIR", "build-modern", "modern"))) {
             cmake -S $game[0] -B $game[1] -G Ninja -DCMAKE_BUILD_TYPE=Release `
               -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -100,33 +105,41 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
-      # Windows and Linux: a zip of a folder holding both programs, each to go next to its game.
-      # macOS: a disk image to drag the apps from into Applications.
+      # Windows and Linux: a zip of a folder holding the programs. macOS: a disk image to drag the
+      # apps from into Applications. The portable programs and Ultima7Modern are archived apart.
       - name: Package
         shell: bash
         run: |
-          # The archive name tells the platforms apart; the folder inside is just Ultima7.
-          name="ultima7-portable-${GITHUB_REF_NAME//\//-}-${{ matrix.name }}"
-          mkdir -p package/Ultima7/licenses
-          cp -R "build-bg/Ultima7${{ matrix.suffix }}" "build-si/Serpent${{ matrix.suffix }}" package/Ultima7/
-          cp "$SHARED_DIR/packaging/README.txt" package/Ultima7/
-          cp "$SHARED_DIR/third_party/libmatoya/LICENSE" package/Ultima7/licenses/libmatoya-LICENSE
-          cp "$SHARED_DIR/third_party/munt/mt32emu/COPYING.LESSER.txt" package/Ultima7/licenses/munt-COPYING.LESSER.txt
-          cp "$SHARED_DIR/third_party/munt/mt32emu/COPYING.txt" package/Ultima7/licenses/munt-COPYING.txt
-          cp "$SHARED_DIR/third_party/nuked-opl3/LICENSE" package/Ultima7/licenses/nuked-opl3-LICENSE
-          cd package
-          if [ "$RUNNER_OS" = "macOS" ]; then
-            ln -s /Applications Ultima7/Applications
-            hdiutil create -volname Ultima7 -srcfolder Ultima7 -format UDZO "$name.dmg"
-            archive="$name.dmg"
-          elif [ "$RUNNER_OS" = "Windows" ]; then
-            7z a "$name.zip" Ultima7 > /dev/null
-            archive="$name.zip"
-          else
-            zip -qr "$name.zip" Ultima7
-            archive="$name.zip"
-          fi
-          echo "ARCHIVE=package/$archive" >> "$GITHUB_ENV"
+          mkdir -p package/out
+          # pack <folder> <archive name> <readme> <program...>
+          pack() {
+            local folder=$1 name=$2 readme=$3
+            shift 3
+            mkdir -p "package/$folder/licenses"
+            cp -R "$@" "package/$folder/"
+            cp "$readme" "package/$folder/README.txt"
+            cp "$SHARED_DIR/third_party/libmatoya/LICENSE" "package/$folder/licenses/libmatoya-LICENSE"
+            cp "$SHARED_DIR/third_party/munt/mt32emu/COPYING.LESSER.txt" "package/$folder/licenses/munt-COPYING.LESSER.txt"
+            cp "$SHARED_DIR/third_party/munt/mt32emu/COPYING.txt" "package/$folder/licenses/munt-COPYING.txt"
+            cp "$SHARED_DIR/third_party/nuked-opl3/LICENSE" "package/$folder/licenses/nuked-opl3-LICENSE"
+            (
+              cd package
+              if [ "$RUNNER_OS" = "macOS" ]; then
+                ln -s /Applications "$folder/Applications"
+                hdiutil create -volname "$folder" -srcfolder "$folder" -format UDZO "out/$name.dmg"
+              elif [ "$RUNNER_OS" = "Windows" ]; then
+                7z a "out/$name.zip" "$folder" > /dev/null
+              else
+                zip -qr "out/$name.zip" "$folder"
+              fi
+            )
+          }
+          # The archive name tells the platforms apart; the folder inside is just the program's.
+          tag="${GITHUB_REF_NAME//\//-}"
+          pack Ultima7 "ultima7-portable-$tag-${{ matrix.name }}" "$SHARED_DIR/packaging/README.txt" \
+            "build-bg/Ultima7${{ matrix.suffix }}" "build-si/Serpent${{ matrix.suffix }}"
+          pack Ultima7Modern "ultima7-modern-$tag-${{ matrix.name }}" "$MODERN_DIR/packaging/README.txt" \
+            "build-modern/Ultima7Modern${{ matrix.suffix }}"
 
       - name: Sign and notarize the disk image (macOS)
         if: runner.os == 'macOS' && env.HAS_SIGNING == 'true'
@@ -135,14 +148,16 @@ jobs:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
         run: |
-          codesign --force --timestamp --sign "$SIGNING_IDENTITY" "$ARCHIVE"
-          "$SHARED_DIR/packaging/notarize.sh" "$ARCHIVE"
-          spctl --assess --type open --context context:primary-signature --verbose=2 "$ARCHIVE"
+          for archive in package/out/*.dmg; do
+            codesign --force --timestamp --sign "$SIGNING_IDENTITY" "$archive"
+            "$SHARED_DIR/packaging/notarize.sh" "$archive"
+            spctl --assess --type open --context context:primary-signature --verbose=2 "$archive"
+          done
 
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.name }}
-          path: ${{ env.ARCHIVE }}
+          path: package/out/*
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
