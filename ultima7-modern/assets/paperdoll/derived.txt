@@ -1,0 +1,2 @@
+# Pictures made at run time from Serpent Isle's PAPERDOL.VGA in the player's own files.
+# name            SI picture  empty frames  colour runs moved (old first-last:new first)
